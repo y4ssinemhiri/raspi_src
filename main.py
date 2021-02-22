@@ -3,7 +3,7 @@ import numpy as np
 import sounddevice as sd 
 
 
-
+fs = 44100
 t = 1
 n = np.arange(t*fs)
 
