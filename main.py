@@ -3,7 +3,7 @@ import numpy as np
 import sounddevice as sd 
 
 
-fs = 44100
+
 t = 1
 n = np.arange(t*fs)
 
@@ -18,6 +18,6 @@ def callback(msg):
     return True
 
 
-with mido.open_input() as inport:
+with mido.open_input("Steinberg UR242 MIDI 1") as inport:
     for msg in inport:
         callback(msg)
