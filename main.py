@@ -38,7 +38,7 @@ async def play_note(midi_msg, **kwargs):
         await event.wait()
 
 
-asyncio def wait_for_midi_input(midi_msg):
+async def wait_for_midi_input(midi_msg):
 
     loop = asyncio.get_event_loop()
     event = asyncio.Event()
