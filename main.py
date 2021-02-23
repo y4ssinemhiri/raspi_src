@@ -54,17 +54,16 @@ async def wait_for_midi_input(midi_msg):
                     print("HERE")
                     return msg
             
+async def midi_event():
+    midi_msg = await wait_for_midi_input(midi_msg)
+    await play_note(midi_msg)
 
 async def main():
 
-    midi_msg = []
+    midi_task = asyncio.create_task(midi_event())
 
     while True:
-        print("wait_for_midi")
-        midi_msg = await wait_for_midi_input(midi_msg)
-        print(midi_msg)
-        print("play_note")
-        await play_note(midi_msg)
+        await midi_task
 
 
 if __name__ == "__main__":
