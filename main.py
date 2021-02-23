@@ -18,9 +18,11 @@ async def play_note(midi_msg, **kwargs):
     channel, note, velocity = midi_msg.bytes()
     f = 2**((note-69)/12) * 440
     buffer = np.sin(2*np.pi*f*n/fs)
+    buffer = np.reshape(buffer, (-1,1)).astype(np.float32)
 
     def callback(outdata, frame_count, time_info, status):
         nonlocal idx
+        print("here")
         if status:
             print(status)
         remainder = len(buffer) - idx
@@ -43,22 +45,26 @@ async def wait_for_midi_input(midi_msg):
     loop = asyncio.get_event_loop()
     event = asyncio.Event()
 
-    with mido.open_input("Steinberg UR242 MIDI 1") as inport: 
-        if msg in inport and msg.types == "note_on":
-            midi_msg = msg
-            loop.call_soon_threadsafe(event.set)
-            raise sd.CallbackStop 
-
-        await event.wait()     
-        
+    with mido.open_input("Steinberg UR242 MIDI 1") as inport:
+        print("waiting for msg")
+        while True:
+            for msg in inport.iter_pending():
+                print(msg)
+                if msg.type == "note_on":
+                    print("HERE")
+                    return msg
             
 
-asyncio def main():
+async def main():
 
-    midi_msg = 0
-    await wait_for_midi_input(midi_msg)
+    midi_msg = []
 
-    await play_note(midi_msg)
+    while True:
+        print("wait_for_midi")
+        midi_msg = await wait_for_midi_input(midi_msg)
+        print(midi_msg)
+        print("play_note")
+        await play_note(midi_msg)
 
 
 if __name__ == "__main__":
