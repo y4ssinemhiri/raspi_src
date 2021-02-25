@@ -56,7 +56,7 @@ async def print_messages():
 
     # print messages as they come just by reading from stream
     async for message in stream:
-        print(message)
+        await play_note(message)
 
 async def get_midi_input(midi_msg):
 
