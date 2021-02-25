@@ -39,8 +39,26 @@ async def play_note(midi_msg, **kwargs):
     with stream:
         await event.wait()
 
+def make_stream():
+    loop = asyncio.get_event_loop()
+    queue = asyncio.Queue()
+    def callback(message):
+        loop.call_soon_threadsafe(queue.put_nowait, message)
+    async def stream():
+        while True:
+            yield await queue.get()
+    return callback, stream()
 
-async def wait_for_midi_input(midi_msg):
+async def print_messages():
+    # create a callback/stream pair and pass callback to mido
+    cb, stream = make_stream()
+    mido.open_input(callback=cb)
+
+    # print messages as they come just by reading from stream
+    async for message in stream:
+        print(message)
+
+async def get_midi_input(midi_msg):
 
     loop = asyncio.get_event_loop()
     event = asyncio.Event()
@@ -63,7 +81,7 @@ async def main():
     midi_task = asyncio.create_task(midi_event())
 
     while True:
-        await midi_task
+        await print_messages()
 
 
 if __name__ == "__main__":
