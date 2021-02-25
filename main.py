@@ -9,13 +9,15 @@ t = 1
 n = np.arange(t*fs)
 
 
-async def play_note(**kwargs):
-    loop = asyncio.get_event_loop()
-    event = asyncio.Event()
-    idx = 0
-
+async def play_note(queue, **kwargs):
     while True:
-        channel, note, velocity = yield.bytes()
+        loop = asyncio.get_event_loop() 
+        event = asyncio.Event()
+        idx = 0
+        msg = await queue.get()
+        print("msg receveid", msg)
+
+        channel, note, velocity = msg.bytes()
         f = 2**((note-69)/12) * 440
         buffer = np.sin(2*np.pi*f*n/fs)
         buffer = np.reshape(buffer, (-1,1)).astype(np.float32)
@@ -39,51 +41,39 @@ async def play_note(**kwargs):
         with stream:
             await event.wait()
 
-def make_stream():
-    loop = asyncio.get_event_loop()
-    queue = asyncio.Queue()
-    def callback(message):
-        loop.call_soon_threadsafe(queue.put_nowait, message)
-    async def stream():
-        while True:
-            yield await queue.get()
-    return callback, stream()
-
-async def print_messages():
-    # create a callback/stream pair and pass callback to mido
-    cb, stream = make_stream()
-    mido.open_input("Steinberg UR242 MIDI 1", callback=cb)
-
-    # print messages as they come just by reading from stream
-    gen = play_note()
-    next(gen)
-    async for message in stream:
-        gen.send(message)
-
-async def get_midi_input(midi_msg):
-
-    loop = asyncio.get_event_loop()
-    event = asyncio.Event()
+async def get_midi_input(queue):
 
     with mido.open_input("Steinberg UR242 MIDI 1") as inport:
         print("waiting for msg")
         while True:
+#            print("input")
             for msg in inport.iter_pending():
-                print(msg)
                 if msg.type == "note_on":
-                    print("HERE")
-                    return msg
-            
+                    print(msg)
+                    await queue.put(msg)
+            await asyncio.sleep(0.001)
+
+
 async def midi_event():
-    midi_msg = await wait_for_midi_input(midi_msg)
-    await play_note()
+    await get_midi_input()
+    #await play_note(midi_msg)
 
 async def main():
+    midi_queue = asyncio.Queue()
 
-    midi_task = asyncio.create_task(midi_event())
+    midi_task = get_midi_input(midi_queue)
+#    play_note_task = asyncio.ensure_future(play_note(midi_queue))
 
-    while True:
-        await print_messages()
+#    with mido.open_input("Steinberg UR242 MIDI 1") as inport:
+#        print("waiting for msg")
+#        while True:
+#            for msg in inport.iter_pending():
+#                print(msg)
+#                await midi_queue.put(msg)
+#            print("test")
+    await asyncio.gather(*[midi_task, play_note(midi_queue)])
+    await midi_queue.join()
+
 
 
 if __name__ == "__main__":
