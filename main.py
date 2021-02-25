@@ -52,7 +52,7 @@ def make_stream():
 async def print_messages():
     # create a callback/stream pair and pass callback to mido
     cb, stream = make_stream()
-    mido.open_input(callback=cb)
+    mido.open_input("Steinberg UR242 MIDI 1", callback=cb)
 
     # print messages as they come just by reading from stream
     async for message in stream:
