@@ -9,35 +9,35 @@ t = 1
 n = np.arange(t*fs)
 
 
-async def play_note(midi_msg, **kwargs):
+async def play_note(**kwargs):
     loop = asyncio.get_event_loop()
     event = asyncio.Event()
     idx = 0
 
+    while True:
+        channel, note, velocity = yield.bytes()
+        f = 2**((note-69)/12) * 440
+        buffer = np.sin(2*np.pi*f*n/fs)
+        buffer = np.reshape(buffer, (-1,1)).astype(np.float32)
 
-    channel, note, velocity = midi_msg.bytes()
-    f = 2**((note-69)/12) * 440
-    buffer = np.sin(2*np.pi*f*n/fs)
-    buffer = np.reshape(buffer, (-1,1)).astype(np.float32)
+        def callback(outdata, frame_count, time_info, status):
+            nonlocal idx
+            print("here")
+            if status:
+                print(status)
+            remainder = len(buffer) - idx
+            if remainder == 0:
+                loop.call_soon_threadsafe(event.set)
+                raise sd.CallbackStop
+            valid_frames = frame_count if remainder >= frame_count else remainder
+            outdata[:valid_frames] = buffer[idx:idx + valid_frames]
+            outdata[valid_frames:] = 0
+            idx += valid_frames
 
-    def callback(outdata, frame_count, time_info, status):
-        nonlocal idx
-        print("here")
-        if status:
-            print(status)
-        remainder = len(buffer) - idx
-        if remainder == 0:
-            loop.call_soon_threadsafe(event.set)
-            raise sd.CallbackStop
-        valid_frames = frame_count if remainder >= frame_count else remainder
-        outdata[:valid_frames] = buffer[idx:idx + valid_frames]
-        outdata[valid_frames:] = 0
-        idx += valid_frames
-
-    stream = sd.OutputStream(callback=callback, dtype=buffer.dtype,
-                             channels=buffer.shape[1], **kwargs)
-    with stream:
-        await event.wait()
+        stream = sd.OutputStream(callback=callback, dtype=buffer.dtype,
+                                channels=buffer.shape[1], **kwargs)
+        with stream:
+            await event.wait()
 
 def make_stream():
     loop = asyncio.get_event_loop()
@@ -55,8 +55,10 @@ async def print_messages():
     mido.open_input("Steinberg UR242 MIDI 1", callback=cb)
 
     # print messages as they come just by reading from stream
+    gen = play_note()
+    next(gen)
     async for message in stream:
-        await play_note(message)
+        gen.send(message)
 
 async def get_midi_input(midi_msg):
 
@@ -74,7 +76,7 @@ async def get_midi_input(midi_msg):
             
 async def midi_event():
     midi_msg = await wait_for_midi_input(midi_msg)
-    await play_note(midi_msg)
+    await play_note()
 
 async def main():
 
