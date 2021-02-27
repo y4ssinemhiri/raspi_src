@@ -92,19 +92,19 @@ async def send_to_audio_stream(q_out, data, blocksize):
             q_out.put_nowait(outdata[frame])
 
 
-async def instrument(q_out, q_midi):
+async def instrument(q_out, q_midi, blocksize=4096):
 
     async for msg, event in midi_stream_generator(q_midi):
         if event.is_set():
             
             channel, note, velocity = msg.bytes()
             f = 2**((note-69)/12) * 440
-
+             
             fs = 44100
             period = fs/f 
             t = (blocksize // period) * period 
-            n = np.arange(t*fs)
-
+            n = np.arange(t)
+            print(t)
             audio_data = 0.1*np.sin(2*np.pi*f*n/fs)
             audio_data = np.reshape(audio_data, (-1,1)).astype(np.float32) 
             
@@ -114,10 +114,11 @@ async def instrument(q_out, q_midi):
 
 async def main():
 
+    q_midi = asyncio.Queue()
     q_out = asyncio.Queue()
     audio_task = asyncio.create_task(audio_wire(q_out))
-    await midi_stream_generator(q_out)
-#    await asyncio.gather(*[audio_task, midi_stream_generator(q_out)])
+#    await instrument(q_out, q_midi)
+    await asyncio.gather(*[audio_task, instrument(q_out, q_midi)])
     await audio_task
 
 
