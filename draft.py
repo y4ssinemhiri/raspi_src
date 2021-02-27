@@ -37,8 +37,7 @@ async def stream_generator(blocksize, *, channels=1, dtype='float32',
             yield outdata, status
             q_out.put_nowait(outdata)
 
-
-async def update_buffer(q_out, **kwargs):
+async def audio_wire(q_out, **kwargs):
     """Create a connection between audio inputs and outputs.
 
     Asynchronously iterates over a stream generator and for each block
@@ -54,21 +53,27 @@ async def update_buffer(q_out, **kwargs):
         except asyncio.QueueEmpty:
             outdata[:] = np.zeros((4096,1))
 
-async def midi_stream_generator(q_out):
 
-    q_in = asyncio.Queue()
+
+async def midi_stream_generator(q_midi):
+
     loop = asyncio.get_event_loop()
+    event = asyncio.Event()
+
     def callback(message):
         if message.type == "note_on":
-            loop.call_soon_threadsafe(q_in.put_nowait, (message))
-            print("from callback", message)
+            loop.call_soon_threadsafe(q_midi.put_nowait, (message))
+            loop.call_soon_threadsafe(event.set)
+        if message.type == "note_off":
+            loop.call_soon_threadsafe(event.clear)
+
 
     port =  mido.open_input("Steinberg UR242 MIDI 1", callback=callback)
     while True:
-        msg = await q_in.get()
+        msg = await q_midi.get()
+        yield msg, event
         print("message receveid", msg)
-        await singer(q_out, msg)
-        print("message processed")
+
 
 
 async def send_to_audio_stream(q_out, data, blocksize):
@@ -87,26 +92,30 @@ async def send_to_audio_stream(q_out, data, blocksize):
             q_out.put_nowait(outdata[frame])
 
 
+async def instrument(q_out, q_midi):
 
+    async for msg, event in midi_stream_generator(q_midi):
+        if event.is_set():
+            
+            channel, note, velocity = msg.bytes()
+            f = 2**((note-69)/12) * 440
 
-async def singer(q_out, msg):
+            fs = 44100
+            period = fs/f 
+            t = (blocksize // period) * period 
+            n = np.arange(t*fs)
 
-    fs = 44100
-    t = 0.1 
-    n = np.arange(t*fs)
-    channel, note, velocity = msg.bytes()
-    f = 2**((note-69)/12) * 440
-    audio_data = 0.1*np.sin(2*np.pi*f*n/fs)
-    audio_data = np.reshape(audio_data, (-1,1)).astype(np.float32)    
-
-    await send_to_audio_stream(q_out, audio_data, blocksize=4096)
+            audio_data = 0.1*np.sin(2*np.pi*f*n/fs)
+            audio_data = np.reshape(audio_data, (-1,1)).astype(np.float32) 
+            
+            await send_to_audio_stream(q_out, audio_data, blocksize=4096)
 
 
 
 async def main():
 
     q_out = asyncio.Queue()
-    audio_task = asyncio.create_task(update_buffer(q_out))
+    audio_task = asyncio.create_task(audio_wire(q_out))
     await midi_stream_generator(q_out)
 #    await asyncio.gather(*[audio_task, midi_stream_generator(q_out)])
     await audio_task
