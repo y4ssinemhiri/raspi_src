@@ -43,103 +43,110 @@ async def audio_wire(q_out, **kwargs):
     simply copies the input data into the output block.
 
     """
-    print("here")
-    async for outdata,status in stream_generator(blocksize=4096):
+    async for outdata, status in stream_generator(blocksize=256):
         if status:
             print(status)
         try:
-            outdata[:] = q_out.get_nowait()
+            data = q_out.get_nowait()
+            q_out.task_done()
+            outdata[:] = data
         except asyncio.QueueEmpty:
-            outdata[:] = np.zeros((4096,1))
+            outdata[:] = np.zeros((256,1))
 
 
 
 async def midi_stream_generator():
-
+   
     loop = asyncio.get_event_loop()
-    q_in = queue.Queue()
+    q_in = asyncio.Queue()
 
-    def callback(message):
-        if message.type == "note_on":
-            loop.call_soon_threadsafe(q_in.put_nowait, (message))
+    def callback(message): 
+        loop.call_soon_threadsafe(q_in.put_nowait, (message))
 
 
     port =  mido.open_input("Steinberg UR242 MIDI 1", callback=callback)
     while True:
+        print("in midi_stream_generator")
+        #try:
         msg = await q_in.get()
         yield msg
         print("message receveid", msg)
 
 
 
-async def send_to_audio_stream(q_out, q_midi, blocksize=4096):
+async def send_to_audio_stream(q_out, q_midi, event, blocksize=256):
+
+    if True:
+        async for data in midi_consumer(q_midi, event):
+            if data is not None:
+                n_channel, n_frames = data.shape[1], data.shape[0] // blocksize  +  1 * (data.shape[0] % blocksize != 0)
+
+                outdata = np.empty((n_frames, blocksize, n_channel))
+                idx = 0
+                for frame  in range(n_frames):
+                     remainder = len(data) - idx
+                     if remainder > 0:
+                        valid_frames = blocksize if remainder >= blocksize else remainder
+                        outdata[frame, :valid_frames] = data[idx:idx + valid_frames]
+                        outdata[frame, valid_frames:] = 0
+                        idx += valid_frames
+                        q_out.put_nowait(outdata[frame])
+
+
+async def midi_listener(q_midi, event, blocksize=256):
+    loop = asyncio.get_event_loop()
 
     while True:
-        data = yield from midi_consumer(q_midi)
+        print("in midi_listener")
+        async for msg in midi_stream_generator():
+            print("in midi_listener")
+            q_midi.put_nowait(msg)
+            print("waiting for midi msg")
+            if msg is not None:
+                if msg.type == "note_on":
+                    loop.call_soon_threadsafe(event.set)
 
-        n_channel, n_frames = data.shape[1], data.shape[0] // blocksize  +  1 * (data.shape[0] % blocksize != 0)
-
-        outdata = np.empty((n_frames, blocksize, n_channel))
-        idx = 0
-        for frame  in range(n_frames):
-            remainder = len(data) - idx
-            if remainder > 0:
-                valid_frames = blocksize if remainder >= blocksize else remainder
-                outdata[frame, :valid_frames] = data[idx:idx + valid_frames]
-                outdata[frame, valid_frames:] = 0
-                idx += valid_frames
-                yield from q_out.put(outdata[frame])
+                if msg.type == "note_off":
+                    print("here")
+                    loop.call_soon_threadsafe(event.clear)
 
 
-async def midi_listener(q_midi, blocksize=4096):
-
-    asyncio.ensure_future(consumer(q_midi))
-    while True:
-        msg = yield from midi_stream_generator()
-        if msg:
-            yield from q_midi.put(msg)
-
-async def midi_consumer(q_midi):
+async def midi_consumer(q_midi, event, blocksize=256):
     
-    event = asyncio.Event()
-    message = None
-
+    t0 = 0
     while True:
+        print(event.is_set())
+        await event.wait()
         try:
-            message =  await q_midi.get_nowait()
+            msg = q_midi.get_nowait()
         except asyncio.QueueEmpty:
             pass
             
-        if message is not None:
-            if msg.type == "note_on":
-                await event.set()
-
-            if msg.type == "note_off":
-                await event.clear()
-
-            if event.is_set():
-                channel, note, velocity = msg.bytes()
-                f = 2**((note-69)/12) * 440
-                    
-                fs = 44100
-                period = fs/f 
-                t = (blocksize // period) * period 
-                n = np.arange(t)
-                audio_data = 0.1*np.sin(2*np.pi*f*n/fs)
-                audio_data = np.reshape(audio_data, (-1,1)).astype(np.float32) 
-                
-                yield from q_out.put(audio_data) 
-    
+        channel, note, velocity = msg.bytes()
+        f = 2**((note-69)/12) * 440
+        fs = 44100 
+        period = blocksize
+        t =  (blocksize // period) * period 
+        n = np.arange(t0, t0 + t)
+        t0 = n[-1]
+        audio_data = 0.1*np.sin(2*np.pi*f*n/fs)
+        audio_data = np.reshape(audio_data, (-1,1)).astype(np.float32)   
+        yield audio_data
+        await asyncio.sleep(blocksize/fs)
 
 async def main():
 
+    event = asyncio.Event()
+    event.clear()
     q_midi = asyncio.Queue()
     q_out = asyncio.Queue()
 
     open_audio_stream = asyncio.create_task(audio_wire(q_out))
-    open_midi_stream = asyncio.create_task(midi_listener(q_midi))
-    await asyncio.gather(*[open_audio_stream, open_midi_stream, send_to_audio_stream(q_out, q_midi)])
-    
+    open_midi_stream = asyncio.create_task(midi_listener(q_midi, event))
+    send_audio_task = asyncio.create_task(send_to_audio_stream(q_out, q_midi, event))
+    await asyncio.gather(*[open_audio_stream, open_midi_stream, send_audio_task])
+
+    await send_audio_task
     await open_midi_stream
     await open_audio_stream
 
