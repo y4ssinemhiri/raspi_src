@@ -43,7 +43,7 @@ async def audio_wire(q_out, **kwargs):
     simply copies the input data into the output block.
 
     """
-    async for outdata, status in stream_generator(blocksize=256):
+    async for outdata, status in stream_generator(**kwargs):
         if status:
             print(status)
         try:
@@ -51,7 +51,7 @@ async def audio_wire(q_out, **kwargs):
             q_out.task_done()
             outdata[:] = data
         except asyncio.QueueEmpty:
-            outdata[:] = np.zeros((256,1))
+            outdata[:] = np.zeros((blocksize,1))
 
 
 
@@ -73,7 +73,7 @@ async def midi_stream_generator():
         print("message receveid", msg)
 
 
-async def midi_listener(q_midi, event, blocksize=256):
+async def midi_listener(q_midi, event, **kwargs):
     loop = asyncio.get_event_loop()
 
     while True:
@@ -91,7 +91,7 @@ async def midi_listener(q_midi, event, blocksize=256):
                     loop.call_soon_threadsafe(event.clear)
 
 
-async def midi_consumer(q_midi, q_out, event, blocksize=256):
+async def midi_consumer(q_midi, q_out, event, **kwargs):
     
     t0 = 0
     while True:
@@ -114,7 +114,7 @@ async def midi_consumer(q_midi, q_out, event, blocksize=256):
         q_out.put_nowait(audio_data)
         await asyncio.sleep(blocksize/fs)
 
-async def main():
+async def main(**kwargs):
 
     event = asyncio.Event()
     event.clear()
@@ -133,7 +133,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(main(blocksize=512))
     except KeyboardInterrupt:
         sys.exit('\nInterrupted by user')
 
