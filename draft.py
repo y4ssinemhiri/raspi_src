@@ -73,26 +73,6 @@ async def midi_stream_generator():
         print("message receveid", msg)
 
 
-
-async def send_to_audio_stream(q_out, q_midi, event, blocksize=256):
-
-    if True:
-        async for data in midi_consumer(q_midi, event):
-            if data is not None:
-                n_channel, n_frames = data.shape[1], data.shape[0] // blocksize  +  1 * (data.shape[0] % blocksize != 0)
-
-                outdata = np.empty((n_frames, blocksize, n_channel))
-                idx = 0
-                for frame  in range(n_frames):
-                     remainder = len(data) - idx
-                     if remainder > 0:
-                        valid_frames = blocksize if remainder >= blocksize else remainder
-                        outdata[frame, :valid_frames] = data[idx:idx + valid_frames]
-                        outdata[frame, valid_frames:] = 0
-                        idx += valid_frames
-                        q_out.put_nowait(outdata[frame])
-
-
 async def midi_listener(q_midi, event, blocksize=256):
     loop = asyncio.get_event_loop()
 
@@ -111,7 +91,7 @@ async def midi_listener(q_midi, event, blocksize=256):
                     loop.call_soon_threadsafe(event.clear)
 
 
-async def midi_consumer(q_midi, event, blocksize=256):
+async def midi_consumer(q_midi, q_out, event, blocksize=256):
     
     t0 = 0
     while True:
@@ -131,7 +111,7 @@ async def midi_consumer(q_midi, event, blocksize=256):
         t0 = n[-1]
         audio_data = 0.1*np.sin(2*np.pi*f*n/fs)
         audio_data = np.reshape(audio_data, (-1,1)).astype(np.float32)   
-        yield audio_data
+        q_out.put_nowait(audio_data)
         await asyncio.sleep(blocksize/fs)
 
 async def main():
@@ -143,8 +123,8 @@ async def main():
 
     open_audio_stream = asyncio.create_task(audio_wire(q_out))
     open_midi_stream = asyncio.create_task(midi_listener(q_midi, event))
-    send_audio_task = asyncio.create_task(send_to_audio_stream(q_out, q_midi, event))
-    await asyncio.gather(*[open_audio_stream, open_midi_stream, send_audio_task])
+    instrument = asyncio.create_task(midi_consumer(q_midi, q_out, event))
+    await asyncio.gather(*[open_audio_stream, open_midi_stream, instrument])
 
     await send_audio_task
     await open_midi_stream
